@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Godot;
 
@@ -12,15 +12,24 @@ public partial class ThreeBody : Node2D
     [Export] public float SofteningFactor = 4000.0f;
     [Export] public bool EnablePullBack = true;
     [Export] public float PullBackThreshold = 1000.0f;
+    [Export] public bool EnableInterpolation = true;
 
-    private Body[] _bodies;
-    private SimulationFramePacket[] _latestFramePackets;
+    public event Action? FrameSkipped;
 
-    private readonly ConcurrentQueue<(SimulationFramePacket[], SimulationFramePacket[])> _framePackets = new();
+    private Body[]? _bodies;
+    private SimulationFramePacket[]? _latestFramePackets;
+
+    private (SimulationFramePacket[], SimulationFramePacket[]) _currentFramePacketsPair;
+    private readonly Channel<(SimulationFramePacket[], SimulationFramePacket[])> _framePacketsChannel =
+        Channel.CreateBounded<(SimulationFramePacket[], SimulationFramePacket[])>(new BoundedChannelOptions(16)
+    {
+        SingleReader = true,
+        SingleWriter = true,
+        FullMode = BoundedChannelFullMode.Wait,
+    });
 
     // private bool _paused;
-    private CancellationTokenSource _cancellationTokenSource;
-    private Task _simulationTask;
+    private CancellationTokenSource? _cancellationTokenSource;
 
     private double _interpolationTimer;
 
@@ -40,13 +49,30 @@ public partial class ThreeBody : Node2D
             return;
         }
 
-#if false
-        if (_framePackets.TryDequeue(out var newFramePackets))
+        if (!EnableInterpolation)
         {
-            for (var i = 0; i < _bodies.Length; i++)
+            _interpolationTimer += delta;
+            if (_interpolationTimer >= ProducerStep
+                || _currentFramePacketsPair == default)
+            {
+                _interpolationTimer -= ProducerStep;
+                var success = _framePacketsChannel.Reader.TryRead(out var newFramePacketsPair);
+                if (!success)
+                {
+                    Task.Run(() => FrameSkipped?.Invoke());
+                    return;
+                }
+                _currentFramePacketsPair = newFramePacketsPair;
+            }
+            if (_currentFramePacketsPair == default)
+            {
+                return;
+            }
+            var targetFramePackets = _currentFramePacketsPair.Item2;
+            for (var i = 0; i < _bodies!.Length; i++)
             {
                 var body = _bodies[i];
-                var packet = newFramePackets[i];
+                var packet = targetFramePackets[i];
                 body.Position = packet.Position;
                 body.Velocity = packet.Velocity;
                 body.Acceleration = packet.Acceleration;
@@ -54,78 +80,108 @@ public partial class ThreeBody : Node2D
                 body.UpdateTrail();
             }
         }
-#else
-        _interpolationTimer += delta;
-        if (_interpolationTimer < ProducerStep)
-        {
-            if (_framePackets.TryPeek(out var framePacketsPair))
-            {
-                var previousFramePackets = framePacketsPair.Item1;
-                var targetFramePackets = framePacketsPair.Item2;
-                var tau = Mathf.Clamp(
-                    (float)(_interpolationTimer / ProducerStep),
-                    0.0f,
-                    1.0f);
-
-                var interpolationStep = (float)ProducerStep;
-
-                for (var i = 0; i < _bodies.Length; i++)
-                {
-                    var body = _bodies[i];
-                    var oldPacket = previousFramePackets[i];
-                    var newPacket = targetFramePackets[i];
-
-                    body.Position = CubicHermite(
-                        oldPacket.Position,
-                        oldPacket.Velocity,
-                        newPacket.Position,
-                        newPacket.Velocity,
-                        tau,
-                        interpolationStep);
-
-                    body.Velocity = CubicHermite(
-                        oldPacket.Velocity,
-                        oldPacket.Acceleration,
-                        newPacket.Velocity,
-                        newPacket.Acceleration,
-                        tau,
-                        interpolationStep);
-
-                    body.Acceleration = oldPacket.Acceleration.Lerp(
-                        newPacket.Acceleration,
-                        tau);
-                    
-                    body.UpdateTrail();
-                }
-            }
-        }
         else
         {
-            if (_framePackets.TryDequeue(out var framePacketsPair))
+            _interpolationTimer += delta;
+            while (_interpolationTimer >= ProducerStep
+                || _currentFramePacketsPair == default)
             {
                 _interpolationTimer -= ProducerStep;
-                var targetFramePackets = framePacketsPair.Item2;
-                for (var i = 0; i < _bodies.Length; i++)
+                var success = _framePacketsChannel.Reader.TryRead(out var newFramePacketsPair);
+                if (!success)
                 {
-                    var body = _bodies[i];
-                    var packet = targetFramePackets[i];
-                    body.Position = packet.Position;
-                    body.Velocity = packet.Velocity;
-                    body.Acceleration = packet.Acceleration;
-
-                    body.UpdateTrail();
+                    Task.Run(() => FrameSkipped?.Invoke());
+                    return;
                 }
+                _currentFramePacketsPair = newFramePacketsPair;
             }
-        }
-#endif
-        
-        if (_cancellationTokenSource is { IsCancellationRequested: false }
-            && (_simulationTask == null || _simulationTask.IsCompleted))
-        {
-            var cancellationToken = _cancellationTokenSource.Token;
-            _simulationTask = Task.Run(
-                () => StartSimulation(cancellationToken),
-                cancellationToken);
+            if (_currentFramePacketsPair == default)
+            {
+                return;
+            }
+            var previousFramePackets = _currentFramePacketsPair.Item1;
+            var targetFramePackets = _currentFramePacketsPair.Item2;
+            var tau = Mathf.Clamp(
+                (float)(_interpolationTimer / ProducerStep),
+                0.0f,
+                1.0f);
+
+            const float interpolationStep = (float)ProducerStep;
+
+            // for (var i = 0; i < (_bodies?.Length ?? 0); i++)
+            // {
+            //     var body = _bodies![i];
+            //     var oldPacket = previousFramePackets[i];
+            //     var newPacket = targetFramePackets[i];
+
+            //     body.Position = CubicHermite(
+            //         oldPacket.Position,
+            //         oldPacket.Velocity,
+            //         newPacket.Position,
+            //         newPacket.Velocity,
+            //         tau,
+            //         interpolationStep);
+
+            //     body.Velocity = CubicHermite(
+            //         oldPacket.Velocity,
+            //         oldPacket.Acceleration,
+            //         newPacket.Velocity,
+            //         newPacket.Acceleration,
+            //         tau,
+            //         interpolationStep);
+
+            //     body.Acceleration = oldPacket.Acceleration.Lerp(
+            //         newPacket.Acceleration,
+            //         tau);
+
+            //     body.UpdateTrail();
+            // }
+            var currentFramePackets = new SimulationFramePacket[_bodies!.Length];
+            Parallel.For(0, _bodies.Length, i =>
+            {
+                var oldPacket = previousFramePackets[i];
+                var newPacket = targetFramePackets[i];
+
+                var interpolatedPosition = CubicHermite(
+                    oldPacket.Position,
+                    oldPacket.Velocity,
+                    newPacket.Position,
+                    newPacket.Velocity,
+                    tau,
+                    interpolationStep);
+
+                var interpolatedVelocity = CubicHermite(
+                    oldPacket.Velocity,
+                    oldPacket.Acceleration,
+                    newPacket.Velocity,
+                    newPacket.Acceleration,
+                    tau,
+                    interpolationStep);
+
+                // It has no impact.
+                // var interpolatedAcceleration = oldPacket.Acceleration.Lerp(
+                //     newPacket.Acceleration,
+                //     tau);
+                var interpolatedAcceleration = oldPacket.Acceleration;
+
+                currentFramePackets[i] = new SimulationFramePacket
+                {
+                    Position = interpolatedPosition,
+                    Velocity = interpolatedVelocity,
+                    Acceleration = interpolatedAcceleration,
+                    Mass = oldPacket.Mass,
+                };
+            });
+            for (var i = 0; i < _bodies!.Length; i++)
+            {
+                var body = _bodies[i];
+                var packet = currentFramePackets[i];
+                body.Position = packet.Position;
+                body.Velocity = packet.Velocity;
+                body.Acceleration = packet.Acceleration;
+
+                body.UpdateTrail();
+            }
         }
     }
 
@@ -133,25 +189,14 @@ public partial class ThreeBody : Node2D
     {
         var cancellationTokenSource = _cancellationTokenSource;
         cancellationTokenSource?.Cancel();
-        try
-        {
-            _simulationTask?.GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            _simulationTask = null;
-            cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-        }
+        cancellationTokenSource?.Dispose();
+        _cancellationTokenSource = null;
     }
 
     public void ResetSimulation()
     {
         PauseSimulation();
-        while (_framePackets.TryDequeue(out _))
+        while (_framePacketsChannel.Reader.TryRead(out _))
         {
         }
 
@@ -192,29 +237,31 @@ public partial class ThreeBody : Node2D
 
         foreach (var body in _bodies)
         {
-            if (body != null)
-            {
-                body.Acceleration = Vector2.Zero;
-            }
+            body.Acceleration = Vector2.Zero;
         }
 
         var bodyCount = _bodies.Length;
         for (var i = 0; i < bodyCount; i++)
         {
             var bodyA = _bodies[i];
+
             for (var j = i + 1; j < bodyCount; j++)
             {
                 var bodyB = _bodies[j];
-                if (bodyA != null && bodyB != null)
-                {
-                    var direction = bodyB.Position - bodyA.Position;
-                    var distanceSquared = direction.LengthSquared() + SofteningFactor;
-                    var forceMagnitude = GravitationalConstant * bodyA.Mass * bodyB.Mass / distanceSquared;
-                    var force = direction.Normalized() * forceMagnitude;
+                var direction = bodyB.Position - bodyA.Position;
 
-                    bodyA.Acceleration += force / bodyA.Mass;
-                    bodyB.Acceleration -= force / bodyB.Mass;
-                }
+                var distanceSquared = direction.LengthSquared() + SofteningFactor;
+                var inverseDistance = (float)(1.0 / Math.Sqrt(distanceSquared));
+                var force = direction * (
+                    GravitationalConstant
+                    * bodyA.Mass
+                    * bodyB.Mass
+                    * inverseDistance
+                    * inverseDistance
+                    * inverseDistance);
+
+                bodyA.Acceleration += force / bodyA.Mass;
+                bodyB.Acceleration -= force / bodyB.Mass;
             }
         }
 
@@ -232,12 +279,28 @@ public partial class ThreeBody : Node2D
         }
 
         _cancellationTokenSource = new CancellationTokenSource();
+
+        _ = StartSimulationLoop(_cancellationTokenSource.Token);
     }
 
-    private void StartSimulation(CancellationToken cancellationToken)
+    private async Task StartSimulationLoop(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Simulation(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task Simulation(CancellationToken cancellationToken)
     {
         const float dt = (float)(ProducerStep / SubSteps);
-        var newFramePackets = _latestFramePackets;
+        var newFramePackets = _latestFramePackets!;
 
         var step = 0;
 
@@ -251,7 +314,7 @@ public partial class ThreeBody : Node2D
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        _framePackets.Enqueue((_latestFramePackets, newFramePackets));
+        await _framePacketsChannel.Writer.WriteAsync((_latestFramePackets!, newFramePackets), cancellationToken);
 
         _latestFramePackets = newFramePackets;
     }
@@ -281,22 +344,40 @@ public partial class ThreeBody : Node2D
             var oldPacket = oldFramePackets[i];
             var newPacket = newFramePackets[i];
             var newAcc = Vector2.Zero;
+
             for (var j = 0; j < n; j++)
             {
                 if (i == j)
                 {
                     continue;
                 }
-                var otherPacket = oldFramePackets[j];
-                var direction = otherPacket.Position - newPacket.Position;
-                var distanceSquared = direction.LengthSquared() + SofteningFactor;
-                var forceMagnitude = GravitationalConstant * oldPacket.Mass * otherPacket.Mass / distanceSquared;
-                var force = direction.Normalized() * forceMagnitude;
 
-                newAcc += force / oldPacket.Mass;
+                var otherNewPacket = newFramePackets[j];
+                var direction = otherNewPacket.Position - newPacket.Position;
+
+                var distanceSquared = direction.LengthSquared() + SofteningFactor;
+                var inverseDistance = (float)(1.0 / Math.Sqrt(distanceSquared));
+                // var force = direction * (
+                //     GravitationalConstant
+                //     * oldPacket.Mass
+                //     * otherNewPacket.Mass
+                //     * inverseDistance
+                //     * inverseDistance
+                //     * inverseDistance);
+
+                // newAcc += force / oldPacket.Mass;
+
+                var factor = GravitationalConstant
+                             * otherNewPacket.Mass
+                             * inverseDistance
+                             * inverseDistance
+                             * inverseDistance;
+
+                newAcc += direction * factor;
             }
 
-            var newVelocity = oldPacket.Velocity + 0.5f * (oldPacket.Acceleration + newAcc) * dt;
+            var newVelocity = oldPacket.Velocity
+                              + 0.5f * (oldPacket.Acceleration + newAcc) * dt;
 
             newFramePackets[i] = newPacket with
             {
@@ -309,7 +390,7 @@ public partial class ThreeBody : Node2D
         {
             var bodiesCenter =
                 newFramePackets.Aggregate(Vector2.Zero, (current, packet) => current + packet.Position);
-            bodiesCenter /= _bodies.Length;
+            bodiesCenter /= _bodies!.Length;
 
             Parallel.For(0, n, i =>
             {
