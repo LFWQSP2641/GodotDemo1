@@ -1,0 +1,91 @@
+[gd_scene format=3 uid="uid://d3unppbcs14rb"]
+
+[ext_resource type="Script" uid="uid://djld0dqxgsxw6" path="res://MarginContainer.cs" id="1_tc2tv"]
+[ext_resource type="Script" uid="uid://16swjsro6ovb" path="res://SidebarController.cs" id="1_yl05h"]
+
+[node name="ThreeBodyHub" type="CanvasLayer" unique_id=317186761]
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=2133134762]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_tc2tv")
+
+[node name="SidebarController" type="Control" parent="MarginContainer" unique_id=739326127 node_paths=PackedStringArray("_sidebarPanel", "_toggleButton", "_energyLabel", "_momentumLabel", "_numberOfBodiesSpinBox", "_gravitationalConstantSpinBox", "_softeningFactorSpinBox", "_pullBackCheckButton", "_applyAndResetButton")]
+layout_mode = 2
+script = ExtResource("1_yl05h")
+_sidebarPanel = NodePath("PanelContainer")
+_toggleButton = NodePath("Button")
+_energyLabel = NodePath("PanelContainer/VBoxContainer/Energy")
+_momentumLabel = NodePath("PanelContainer/VBoxContainer/Momentum")
+_numberOfBodiesSpinBox = NodePath("PanelContainer/VBoxContainer/NumberOfBodiesSpinBox")
+_gravitationalConstantSpinBox = NodePath("PanelContainer/VBoxContainer/GravitationalConstantSpinBox")
+_softeningFactorSpinBox = NodePath("PanelContainer/VBoxContainer/SofteningFactorSpinBox")
+_pullBackCheckButton = NodePath("PanelContainer/VBoxContainer/PullBackCheckButton")
+_applyAndResetButton = NodePath("PanelContainer/VBoxContainer/ApplyAndResetButton")
+
+[node name="PanelContainer" type="PanelContainer" parent="MarginContainer/SidebarController" unique_id=1470954378]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 112.0
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/SidebarController/PanelContainer" unique_id=750659495]
+layout_mode = 2
+
+[node name="Energy" type="Label" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=942854691]
+layout_mode = 2
+
+[node name="Momentum" type="Label" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=1118889376]
+layout_mode = 2
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=212945721]
+layout_mode = 2
+
+[node name="NumberOfBodiesLabel" type="Label" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=919726040]
+layout_mode = 2
+text = "个数"
+
+[node name="NumberOfBodiesSpinBox" type="SpinBox" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=1073391839]
+layout_mode = 2
+min_value = 2.0
+max_value = 10000.0
+value = 16.0
+
+[node name="GravitationalConstantLabel" type="Label" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=2002109860]
+layout_mode = 2
+text = "引力常数"
+
+[node name="GravitationalConstantSpinBox" type="SpinBox" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=208070123]
+layout_mode = 2
+min_value = 1.0
+max_value = 100000000000000.0
+value = 10000.0
+allow_greater = true
+
+[node name="SofteningFactorLabel" type="Label" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=1439615547]
+layout_mode = 2
+text = "软化因子"
+
+[node name="SofteningFactorSpinBox" type="SpinBox" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=954248791]
+layout_mode = 2
+max_value = 100000000000000.0
+value = 4000.0
+
+[node name="PullBackCheckButton" type="CheckButton" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=1112068699]
+layout_mode = 2
+button_pressed = true
+text = "边界拉回"
+
+[node name="ApplyAndResetButton" type="Button" parent="MarginContainer/SidebarController/PanelContainer/VBoxContainer" unique_id=1990892186]
+layout_mode = 2
+text = "应用并重置"
+
+[node name="Button" type="Button" parent="MarginContainer/SidebarController" unique_id=297901524]
+layout_mode = 1
+offset_right = 8.0
+offset_bottom = 8.0

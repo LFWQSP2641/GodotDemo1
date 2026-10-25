@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://dthdo1cfluhdn"]
+
+[ext_resource type="PackedScene" uid="uid://ctugq7dw4ggip" path="res://ThreeBody.tscn" id="1_uu6xs"]
+[ext_resource type="PackedScene" uid="uid://d3unppbcs14rb" path="res://ThreeBodyHub.tscn" id="2_r0du0"]
+
+[node name="Main" type="Node2D" unique_id=831152579]
+
+[node name="ThreeBody" parent="." unique_id=776338967 instance=ExtResource("1_uu6xs")]
+
+[node name="ThreeBodyHub" parent="." unique_id=621261004 instance=ExtResource("2_r0du0")]

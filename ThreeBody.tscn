@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://ctugq7dw4ggip"]
+
+[ext_resource type="Script" uid="uid://m5djg7p8aya3" path="res://ThreeBody.cs" id="1_rfibw"]
+[ext_resource type="Script" uid="uid://b0lnyx4l56tgp" path="res://Camera2d.cs" id="2_mtmtj"]
+
+[node name="Node2D" type="Node2D" unique_id=776338967]
+script = ExtResource("1_rfibw")
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=658244762]
+script = ExtResource("2_mtmtj")
